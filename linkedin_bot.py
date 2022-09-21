@@ -65,77 +65,84 @@ def getCompaniesJobLink(browser):
     
         
     return companies_jobpages
-
-def no_jobs(curr_jobpage):
-    browser.get(curr_jobpage)
-    job_company = browser.find_elements(By.XPATH,'//h1')
-    job_company = job_company[0].text
-    print(job_company)
-    job_info = None
-    print('im here1')
-    try:
-        print('are there jobs?')
-        # trying to look for jobs. if fails -> no jobs
-        browser.find_element(By.XPATH,"//a[contains(@href,'/jobs/search/')]")
-        print('yes there are jobs')        
-    except:
-        print('im here because there werent any jobs')
+def noJobs(browser):
+        # case where there are no jobs
+        job_company = browser.find_elements(By.XPATH,'//h1')
+        job_company = job_company[0].text
         data = {'Company name': [job_company],
                                  'Job Title': 'no jobs'}
         job_info = pd.DataFrame(data)
-        print(job_info)
-    finally:
-        print('im hereeeee')
         return job_info
-
-def yes_jobs(curr_jobpage):
-    browser.get(curr_jobpage)
-    time.sleep(3)
-    all_jobs = browser.find_element(By.XPATH,"//a[contains(@href,'/jobs/search/')]")
-       
-    time.sleep(3)
-    all_jobs.click()
-    time.sleep(3)
-    job_text = browser.find_elements(By.CLASS_NAME,"occludable-update")
-    job_date = browser.find_elements(By.XPATH,"//time")
-    job_company, job_titles, job_locations, job_post_times = [], [], [], []
-    unwanted_text = 'See more jobs with these suggestions:'
-    for i in range(len(job_text)):
-        curr_job = job_text[i].text
-        curr_date = job_date[i].get_attribute("datetime")
-                # TODO: remove if statement and create scrolling 
-        if len(curr_job) > 1:
-            if unwanted_text not in curr_job:
-                curr_job = curr_job.split('\n')
-                job_titles.append(curr_job[0])
-                job_company.append(curr_job[1])
-                job_locations.append(curr_job[2])
-                job_post_times = curr_date
-                        
-            
+    
+def createDataFrame(job_company, job_titles, job_locations, job_post_times):
+    # create DataFrame      
     data = {'Company name': job_company,
             'Job Title':job_titles,
             'Job Location': job_locations,
             'Date Posted': job_post_times}
     jobs_df = pd.DataFrame(data)
-    print('before')
-    print(jobs_df)
+    
+    # clean up: remove jobs that arent located in Israel
     job_info = jobs_df.loc[jobs_df['Job Location'].str.contains("Israel")]
     
+    # clean up: remove "Israel" from job locations, as they are all in Israel
+    job_info['Job Location'] = job_info['Job Location'].str.replace(', Israel', '')
+    
+    
     return job_info
-
-def job_finder(curr_jobpage):
-    job_info = no_jobs(curr_jobpage)
-    print(job_info)
-    print('job info in none if there are jobs')
-    if job_info is None:
+    
+def jobFinder(curr_jobpage):
+    browser.get(curr_jobpage)
+    time.sleep(3)
         
-        print('im here because there are jobs')
-        job_info = yes_jobs(curr_jobpage)
-   
-    return job_info
+    try:
+        # wont find this element if there are no job boxes
+        all_jobs = browser.find_element(By.XPATH,"//a[contains(@href,'/jobs/search/')]")
+        
+    except:
+        job_info = noJobs(browser)
+    else:    
+        time.sleep(3)
+        all_jobs.click()
+        time.sleep(3)
+        job_text = browser.find_elements(By.CLASS_NAME,"occludable-update")
+        job_date = browser.find_elements(By.XPATH,"//time")
+        job_company, job_titles, job_locations, job_post_times = [], [], [], []
+        unwanted_text = 'See more jobs with these suggestions:'
+        for i in range(len(job_text)):
+            curr_job = job_text[i].text
+            try:
+                curr_date = job_date[i].get_attribute("datetime")
+            except:
+                curr_date = 'Promoted'
+            finally:
+                # TODO: remove if statement and create scrolling 
+                # TODO: create class job
+                if len(curr_job) > 1:
+                    if unwanted_text not in curr_job:
+                        curr_job = curr_job.split('\n')
+                        job_titles.append(curr_job[0])
+                        job_company.append(curr_job[1])
+                        job_locations.append(curr_job[2])
+                        job_post_times = curr_date
+                        
+        # create DataFrame      
+        job_info = createDataFrame(job_company, job_titles, job_locations, job_post_times)
+        
+    finally:
+        return job_info
 
 
+def cleanData(companies_df):
+    with open('unwanted_jobs.json', 'r') as openfile:
+        unwanted_jobs_dict= json.load(openfile)
+    keywords = unwanted_jobs_dict['keywords']
+    for i in range(0,len(keywords)):
+        companies_df = companies_df.loc[companies_df['Job Title'].str.contains(keywords[i])]
+    
+    return companies_df
+    
+"""
 # a lot of jobs
 curr_jobpage = 'https://www.linkedin.com/company/81904307/jobs/'
 
@@ -145,24 +152,26 @@ curr_jobpage = 'https://www.linkedin.com/company/81904307/jobs/'
 # print(job_title, job_date)
 #little jobs
 curr_jobpage = 'https://www.linkedin.com/company/livemetric.com/jobs/'
-
+"""
 
 
 
 # main
+with open('login_data.json', 'r') as openfile:
+    json_data = json.load(openfile)
+    
 browser = webdriver.Chrome("chromedriver.exe")
-# login(browser, "yourmail05@gmail.com","***" )
-#companies_jobpages = getCompaniesJobLink(browser)
-curr_jobpage = 'https://www.linkedin.com/company/vlx-ventures/jobs/'
-job_info = job_finder(curr_jobpage)
-print('after')
-print(job_info)
-"""
-for curr_jobpage in companies_jobpages:
-    job_info = job_finder(curr_jobpage)
-    print('after')
-    print(job_info)
-"""
+login(browser, json_data['email'], json_data['password'])
+companies_jobpages = getCompaniesJobLink(browser)
+
+companies_df = jobFinder(companies_jobpages[0])
+companies_jobpages = companies_jobpages[0:5]
+for curr_jobpage in companies_jobpages[1:]:
+    job_info = jobFinder(curr_jobpage)
+    companies_df = pd.concat([companies_df, job_info])
+    
+    
+print(companies_df)
 
 
 
