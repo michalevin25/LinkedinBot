@@ -4,26 +4,30 @@ Created on Tue Sep 13 02:07:00 2022
 
 @author: micha
 """
-import time
-import pandas as pd
+
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-
 import time
+import sys
+import pandas as pd
 import json
-# measure time
-t = time.time()
 
-browser = webdriver.Chrome("chromedriver.exe")
 
-def login(browser, username, password): 
+
+def login(browser): 
+    # json file with user info
+    with open('login_data.json', 'r') as openfile:
+        json_data = json.load(openfile)
+        
     browser.get("https://www.linkedin.com")
     username_key = browser.find_element(By.ID,"session_key")
-    username_key.send_keys(username)
+    username_key.send_keys(json_data['email'])
     password_key = browser.find_element(By.ID,"session_password")
-    password_key.send_keys(password)
+    password_key.send_keys(json_data['password'])
     login_button = browser.find_element(By.CLASS_NAME, "sign-in-form__submit-button")
     login_button.click()
 
@@ -45,12 +49,12 @@ def getCompaniesJobLink(browser):
     
     # companies I follow on Linkedin
     browser.get("https://www.linkedin.com/in/michallevin25/details/interests/?detailScreenTabIndex=1")
-    infiniteScroll(browser)
+    # infiniteScroll(browser)
     
     # find all company links
-    time.sleep(3)
+    time.sleep(5)
+    WebDriverWait(browser, 20).until(EC.visibility_of_element_located((By.XPATH,"//a[contains(@href,'https://www.linkedin.com/company/')]")))
     company_page = browser.find_elements(By.XPATH,"//a[contains(@href,'https://www.linkedin.com/company/')]")
-    
     # create link for the job page for each company
     # TODO: company_page returns two times the same link. check if possible to remove one of them and then remove if statement
     companies_jobpages = []
@@ -65,6 +69,7 @@ def getCompaniesJobLink(browser):
     return companies_jobpages
 def noJobs(browser):
         # case where there are no jobs
+        WebDriverWait(browser, 20).until(EC.visibility_of_element_located((By.XPATH,'//h1')))
         job_company = browser.find_elements(By.XPATH,'//h1')
         job_company = job_company[0].text
         data = {'Company name': [job_company],
@@ -72,41 +77,54 @@ def noJobs(browser):
         job_info = pd.DataFrame(data)
         return job_info
     
-def createDataFrame(job_company, job_titles, job_locations):
+def createDataFrame(job_company, job_titles, job_locations,job_link,other_info):
     # create DataFrame      
     data = {'Company name': job_company,
             'Job Title':job_titles,
-            'Job Location': job_locations}
+            'Job Location': job_locations,
+            'Job Link': job_link,
+            'Other Info': other_info}
     
     job_info = pd.DataFrame(data)
     return job_info
 
+def searchLocation():
+        time.sleep(5)   
+        # job location - israel
+        search_bars = browser.find_elements(By.CLASS_NAME, 'jobs-search-box__text-input')
+        search_location = search_bars[3]
+        search_location.clear()
+        search_location.send_keys('israel')
+        search_location.send_keys(Keys.RETURN)
+        time.sleep(5)
 
-
-def jobFinder(curr_jobpage):
+def jobFinder(browser,curr_jobpage):
     browser.get(curr_jobpage)
-    time.sleep(3)
-        
+    
     try:
         # wont find this element if there are no job boxes
+        WebDriverWait(browser, 20).until(EC.visibility_of_element_located((By.CLASS_NAME, "org-jobs-recently-posted-jobs-module__show-all-jobs-btn")))
         all_jobs = browser.find_element(By.CLASS_NAME, "org-jobs-recently-posted-jobs-module__show-all-jobs-btn")
+        
     except:
+        
         job_info = noJobs(browser)
-    else:    
+        return job_info
+    else:   
+        
         time.sleep(3)
+        # sometimes there is an additional banner on the page - scrolling is needed to show the "show all jobs" button 
+       
         if all_jobs.is_displayed():
             all_jobs.click()
         else:
-            print('im here')
             browser.execute_script('window.scrollTo(0, document.body.scrollHeight);')
             all_jobs.click()
-
-            
-        time.sleep(3)
+        searchLocation()
         job_text = browser.find_elements(By.CLASS_NAME,"occludable-update")
-        job_company, job_titles, job_locations = [], [], []
-        time.sleep(3)
+        job_company, job_titles, job_locations, other_info = [], [], [], []
         unwanted_text = 'See more jobs with these suggestions:'
+        
         for i in range(len(job_text)):
             curr_job = job_text[i].text
         
@@ -114,21 +132,38 @@ def jobFinder(curr_jobpage):
             # TODO: create class job
             if len(curr_job) > 1:
                 if unwanted_text not in curr_job:
-                    if 'Israel' in curr_job:
-                        curr_job = curr_job.split('\n')
-                        job_titles.append(curr_job[0])
-                        job_company.append(curr_job[1])
-                        job_locations.append(curr_job[2].replace('Israel', ' '))
-
-                        
-        # create DataFrame      
-        job_info = createDataFrame(job_company, job_titles, job_locations)
+                    curr_job = curr_job.split('\n')
+                    job_titles.append(curr_job[0])
+                    job_company.append(curr_job[1])
+                    job_locations.append(curr_job[2].replace(', Israel', ' '))
+                    other_info.append(', '.join(e for e in curr_job[3:]))
+                      
+        # create DataFrame   
+        job_link = [curr_jobpage] * len(other_info)
+        job_info = createDataFrame(job_company, job_titles, job_locations,job_link, other_info)
         
         return job_info
-
-
-def cleanData(companies_df):
     
+def printProgressBar(index, total, label):
+    n_bar = 50  # Progress bar width
+    progress = index / total
+    sys.stdout.write('\r')
+    sys.stdout.write(f"[{'=' * int(n_bar * progress):{n_bar}s}] {int(100 * progress)}%  {label}")
+    sys.stdout.flush()
+    
+def concatDFs(browser,companies_jobpages):
+    companies_df = jobFinder(browser,companies_jobpages[0])
+    L = len(companies_jobpages)-1
+    
+    for index, curr_jobpage in enumerate(companies_jobpages[1:]):
+        job_info = jobFinder(browser,curr_jobpage)
+        companies_df = pd.concat([companies_df, job_info])
+        printProgressBar(index, L, "complete")
+    
+    return companies_df
+    
+    
+def cleanData(companies_df):
     # remove job titles with unwanted keywords
     with open('unwanted_jobs.json', 'r') as openfile:
         unwanted_jobs_dict= json.load(openfile)
@@ -136,34 +171,42 @@ def cleanData(companies_df):
     for i in range(0,len(keywords)):
         word = keywords[i]
         companies_df = companies_df[companies_df["Job Title"].str.contains(word) == False]
+        
+    cities = unwanted_jobs_dict['cities']
+    for i in range(0,len(cities)):
+        word = cities[i]
+        companies_df = companies_df[companies_df["Job Location"].str.contains(word) == False]
     
     # remove Nan
     companies_df.dropna(subset=['Job Title'])
     
     # reset index
     companies_df = companies_df.reset_index(drop = True)
-    
     return companies_df
     
 
-# main
-with open('login_data.json', 'r') as openfile:
-    json_data = json.load(openfile)
-    
-browser = webdriver.Chrome("chromedriver.exe")
-login(browser, json_data['email'], json_data['password'])
-companies_jobpages = getCompaniesJobLink(browser)
-companies_df = jobFinder(companies_jobpages[0])
-for curr_jobpage in companies_jobpages[1:]:
-    job_info = jobFinder(curr_jobpage)
-    companies_df = pd.concat([companies_df, job_info])
-    
-companies_df = cleanData(companies_df)
-print(companies_df)
+#def main():
+    # measure time
+t = time.time()
 
-elapsed = time.time() - t
-print("running time", elapsed)
+chrome_executable = Service(executable_path='chromedriver.exe', log_path='NUL')
+browser = webdriver.Chrome(service=chrome_executable)
+
+login(browser)
+companies_jobpages = getCompaniesJobLink(browser)
+companies_jobpages = companies_jobpages[0:10]
+companies_df = concatDFs(browser,companies_jobpages)
+companies_df_clean = cleanData(companies_df)
+
 
 # write to excel
-companies_df.to_excel("companies.xlsx")
+companies_df_clean.to_excel("companies.xlsx")
+elapsed = time.time() - t
+sys.stdout.write('\r')
+print("Finished! Running time:", elapsed)
 
+"""    
+if __name__ == "__main__":
+    main()
+    
+"""
