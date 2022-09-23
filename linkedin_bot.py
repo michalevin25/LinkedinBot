@@ -2,7 +2,7 @@
 """
 Created on Tue Sep 13 02:07:00 2022
 
-@author: micha
+@author: michal
 """
 
 from selenium import webdriver
@@ -29,6 +29,8 @@ def login(browser):
     password_key = browser.find_element(By.ID,"session_password")
     password_key.send_keys(json_data['password'])
     login_button = browser.find_element(By.CLASS_NAME, "sign-in-form__submit-button")
+    # TODO: remove sleep
+    time.sleep(3)
     login_button.click()
 
 def infiniteScroll(browser):
@@ -49,7 +51,7 @@ def getCompaniesJobLink(browser):
     
     # companies I follow on Linkedin
     browser.get("https://www.linkedin.com/in/michallevin25/details/interests/?detailScreenTabIndex=1")
-    # infiniteScroll(browser)
+    infiniteScroll(browser)
     
     # find all company links
     time.sleep(5)
@@ -67,15 +69,27 @@ def getCompaniesJobLink(browser):
     
         
     return companies_jobpages
-def noJobs(browser):
-        # case where there are no jobs
+
+def noJobs(browser, curr_jobpage = '', jobstatus = 'global'):
+        if jobstatus == 'local':
+            # only if there are no jobs in israel. 
+            browser.get(curr_jobpage)
+            
         WebDriverWait(browser, 20).until(EC.visibility_of_element_located((By.XPATH,'//h1')))
         job_company = browser.find_elements(By.XPATH,'//h1')
         job_company = job_company[0].text
+        
+        # I filled the data so the cleanData function doesnt remove stuff
         data = {'Company name': [job_company],
-                                 'Job Title': 'no jobs'}
+                'Job Title': 'no jobs',
+                'Job Location': 'none',
+                'Job Link': 'none',
+                'Other Info': 'none'}
         job_info = pd.DataFrame(data)
         return job_info
+
+
+    
     
 def createDataFrame(job_company, job_titles, job_locations,job_link,other_info):
     # create DataFrame      
@@ -88,16 +102,43 @@ def createDataFrame(job_company, job_titles, job_locations,job_link,other_info):
     job_info = pd.DataFrame(data)
     return job_info
 
-def searchLocation():
+def searchLocation(location):
         time.sleep(5)   
         # job location - israel
         search_bars = browser.find_elements(By.CLASS_NAME, 'jobs-search-box__text-input')
         search_location = search_bars[3]
         search_location.clear()
-        search_location.send_keys('israel')
+        search_location.send_keys(location)
         search_location.send_keys(Keys.RETURN)
         time.sleep(5)
 
+def noJobsinLocation(browser, curr_jobpage):
+    try:
+        browser.find_element(By.CLASS_NAME,"jobs-search-no-results-banner")
+        job_info = noJobs(browser, curr_jobpage, jobstatus = 'local')
+        return job_info
+    except:
+        pass
+
+def foundJobs(browser):
+    job_text = browser.find_elements(By.CLASS_NAME,"occludable-update")
+    job_company, job_titles, job_locations, other_info = [], [], [], []
+    unwanted_text = 'See more jobs with these suggestions:'
+    
+    for i in range(len(job_text)):
+        curr_job = job_text[i].text
+    
+        # TODO: remove if statement and create scrolling 
+        # TODO: create class job
+        if len(curr_job) > 1:
+            if unwanted_text not in curr_job:
+                curr_job = curr_job.split('\n')
+                job_titles.append(curr_job[0])
+                job_company.append(curr_job[1])
+                job_locations.append(curr_job[2].replace(', Israel', ' '))
+                other_info.append(', '.join(e for e in curr_job[3:]))
+    return job_company, job_titles, job_locations, other_info 
+ 
 def jobFinder(browser,curr_jobpage):
     browser.get(curr_jobpage)
     
@@ -107,11 +148,8 @@ def jobFinder(browser,curr_jobpage):
         all_jobs = browser.find_element(By.CLASS_NAME, "org-jobs-recently-posted-jobs-module__show-all-jobs-btn")
         
     except:
-        
         job_info = noJobs(browser)
-        return job_info
-    else:   
-        
+    else:  
         time.sleep(3)
         # sometimes there is an additional banner on the page - scrolling is needed to show the "show all jobs" button 
        
@@ -120,29 +158,20 @@ def jobFinder(browser,curr_jobpage):
         else:
             browser.execute_script('window.scrollTo(0, document.body.scrollHeight);')
             all_jobs.click()
-        searchLocation()
-        job_text = browser.find_elements(By.CLASS_NAME,"occludable-update")
-        job_company, job_titles, job_locations, other_info = [], [], [], []
-        unwanted_text = 'See more jobs with these suggestions:'
         
-        for i in range(len(job_text)):
-            curr_job = job_text[i].text
+        # enter location in search box
+        searchLocation('israel')
         
-            # TODO: remove if statement and create scrolling 
-            # TODO: create class job
-            if len(curr_job) > 1:
-                if unwanted_text not in curr_job:
-                    curr_job = curr_job.split('\n')
-                    job_titles.append(curr_job[0])
-                    job_company.append(curr_job[1])
-                    job_locations.append(curr_job[2].replace(', Israel', ' '))
-                    other_info.append(', '.join(e for e in curr_job[3:]))
+        # a banner pops up if as a result of changing location there are no jobs 
+        job_info = noJobsinLocation(browser, curr_jobpage)
+        
+        # in the case that there are jobs at the location
+        job_company, job_titles, job_locations, other_info  = foundJobs(browser)
                       
         # create DataFrame   
         job_link = [curr_jobpage] * len(other_info)
         job_info = createDataFrame(job_company, job_titles, job_locations,job_link, other_info)
-        
-        return job_info
+    return job_info
     
 def printProgressBar(index, total, label):
     n_bar = 50  # Progress bar width
@@ -168,15 +197,16 @@ def cleanData(companies_df):
     with open('unwanted_jobs.json', 'r') as openfile:
         unwanted_jobs_dict= json.load(openfile)
     keywords = unwanted_jobs_dict['keywords']
+    
     for i in range(0,len(keywords)):
         word = keywords[i]
         companies_df = companies_df[companies_df["Job Title"].str.contains(word) == False]
-        
+
+       
     cities = unwanted_jobs_dict['cities']
     for i in range(0,len(cities)):
-        word = cities[i]
-        companies_df = companies_df[companies_df["Job Location"].str.contains(word) == False]
-    
+        city = cities[i]
+        companies_df = companies_df[companies_df["Job Location"].str.contains(city) == False]
     # remove Nan
     companies_df.dropna(subset=['Job Title'])
     
@@ -194,7 +224,6 @@ browser = webdriver.Chrome(service=chrome_executable)
 
 login(browser)
 companies_jobpages = getCompaniesJobLink(browser)
-companies_jobpages = companies_jobpages[0:10]
 companies_df = concatDFs(browser,companies_jobpages)
 companies_df_clean = cleanData(companies_df)
 
@@ -203,10 +232,10 @@ companies_df_clean = cleanData(companies_df)
 companies_df_clean.to_excel("companies.xlsx")
 elapsed = time.time() - t
 sys.stdout.write('\r')
-print("Finished! Running time:", elapsed)
 
 """    
 if __name__ == "__main__":
     main()
     
 """
+
