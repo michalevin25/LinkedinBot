@@ -6,17 +6,15 @@ Created on Tue Sep 13 02:07:00 2022
 """
 import time
 import pandas as pd
-import re
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import NoSuchElementException, ElementClickInterceptedException, NoSuchElementException
-from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.support import expected_conditions as EC
 
 import time
 import json
+# measure time
+t = time.time()
 
 browser = webdriver.Chrome("chromedriver.exe")
 
@@ -74,87 +72,79 @@ def noJobs(browser):
         job_info = pd.DataFrame(data)
         return job_info
     
-def createDataFrame(job_company, job_titles, job_locations, job_post_times):
+def createDataFrame(job_company, job_titles, job_locations):
     # create DataFrame      
     data = {'Company name': job_company,
             'Job Title':job_titles,
-            'Job Location': job_locations,
-            'Date Posted': job_post_times}
-    jobs_df = pd.DataFrame(data)
+            'Job Location': job_locations}
     
-    # clean up: remove jobs that arent located in Israel
-    job_info = jobs_df.loc[jobs_df['Job Location'].str.contains("Israel")]
-    
-    # clean up: remove "Israel" from job locations, as they are all in Israel
-    job_info['Job Location'] = job_info['Job Location'].str.replace(', Israel', '')
-    
-    
+    job_info = pd.DataFrame(data)
     return job_info
-    
+
+
+
 def jobFinder(curr_jobpage):
     browser.get(curr_jobpage)
     time.sleep(3)
         
     try:
         # wont find this element if there are no job boxes
-        all_jobs = browser.find_element(By.XPATH,"//a[contains(@href,'/jobs/search/')]")
-        
+        all_jobs = browser.find_element(By.CLASS_NAME, "org-jobs-recently-posted-jobs-module__show-all-jobs-btn")
     except:
         job_info = noJobs(browser)
     else:    
         time.sleep(3)
-        all_jobs.click()
+        if all_jobs.is_displayed():
+            all_jobs.click()
+        else:
+            print('im here')
+            browser.execute_script('window.scrollTo(0, document.body.scrollHeight);')
+            all_jobs.click()
+
+            
         time.sleep(3)
         job_text = browser.find_elements(By.CLASS_NAME,"occludable-update")
-        job_date = browser.find_elements(By.XPATH,"//time")
-        job_company, job_titles, job_locations, job_post_times = [], [], [], []
+        job_company, job_titles, job_locations = [], [], []
+        time.sleep(3)
         unwanted_text = 'See more jobs with these suggestions:'
         for i in range(len(job_text)):
             curr_job = job_text[i].text
-            try:
-                curr_date = job_date[i].get_attribute("datetime")
-            except:
-                curr_date = 'Promoted'
-            finally:
-                # TODO: remove if statement and create scrolling 
-                # TODO: create class job
-                if len(curr_job) > 1:
-                    if unwanted_text not in curr_job:
+        
+            # TODO: remove if statement and create scrolling 
+            # TODO: create class job
+            if len(curr_job) > 1:
+                if unwanted_text not in curr_job:
+                    if 'Israel' in curr_job:
                         curr_job = curr_job.split('\n')
                         job_titles.append(curr_job[0])
                         job_company.append(curr_job[1])
-                        job_locations.append(curr_job[2])
-                        job_post_times = curr_date
+                        job_locations.append(curr_job[2].replace('Israel', ' '))
+
                         
         # create DataFrame      
-        job_info = createDataFrame(job_company, job_titles, job_locations, job_post_times)
+        job_info = createDataFrame(job_company, job_titles, job_locations)
         
-    finally:
         return job_info
 
 
 def cleanData(companies_df):
+    
+    # remove job titles with unwanted keywords
     with open('unwanted_jobs.json', 'r') as openfile:
         unwanted_jobs_dict= json.load(openfile)
     keywords = unwanted_jobs_dict['keywords']
     for i in range(0,len(keywords)):
-        companies_df = companies_df.loc[companies_df['Job Title'].str.contains(keywords[i])]
+        word = keywords[i]
+        companies_df = companies_df[companies_df["Job Title"].str.contains(word) == False]
+    
+    # remove Nan
+    companies_df.dropna(subset=['Job Title'])
+    
+    # reset index
+    companies_df = companies_df.reset_index(drop = True)
     
     return companies_df
     
-"""
-# a lot of jobs
-curr_jobpage = 'https://www.linkedin.com/company/81904307/jobs/'
-
-# no jobs
- #curr_jobpage = 'https://www.linkedin.com/company/aviv-scientific/jobs/'
-
-# print(job_title, job_date)
-#little jobs
-curr_jobpage = 'https://www.linkedin.com/company/livemetric.com/jobs/'
-"""
-
-
 
 # main
 with open('login_data.json', 'r') as openfile:
@@ -163,15 +153,17 @@ with open('login_data.json', 'r') as openfile:
 browser = webdriver.Chrome("chromedriver.exe")
 login(browser, json_data['email'], json_data['password'])
 companies_jobpages = getCompaniesJobLink(browser)
-
 companies_df = jobFinder(companies_jobpages[0])
-companies_jobpages = companies_jobpages[0:5]
 for curr_jobpage in companies_jobpages[1:]:
     job_info = jobFinder(curr_jobpage)
     companies_df = pd.concat([companies_df, job_info])
     
-    
+companies_df = cleanData(companies_df)
 print(companies_df)
 
+elapsed = time.time() - t
+print("running time", elapsed)
 
+# write to excel
+companies_df.to_excel("companies.xlsx")
 
