@@ -24,6 +24,7 @@ def login(browser):
         json_data = json.load(openfile)
         
     browser.get("https://www.linkedin.com")
+    time.sleep(3)
     username_key = browser.find_element(By.ID,"session_key")
     username_key.send_keys(json_data['email'])
     password_key = browser.find_element(By.ID,"session_password")
@@ -84,6 +85,8 @@ def noJobs(browser, curr_jobpage = '', jobstatus = 'global'):
                 'Job Title': 'no jobs',
                 'Job Location': 'none',
                 'Job Link': 'none',
+                'HR Name': 'none',
+                'HR link': 'none',
                 'Other Info': 'none'}
         job_info = pd.DataFrame(data)
         return job_info
@@ -91,12 +94,14 @@ def noJobs(browser, curr_jobpage = '', jobstatus = 'global'):
 
     
     
-def createDataFrame(job_company, job_titles, job_locations,job_link,other_info):
+def createDataFrame(job_company, job_titles, job_locations,job_link,HR_name, HR_link, other_info):
     # create DataFrame      
     data = {'Company name': job_company,
             'Job Title':job_titles,
             'Job Location': job_locations,
             'Job Link': job_link,
+            'HR Name': HR_name,
+            'HR link': HR_link,
             'Other Info': other_info}
     
     job_info = pd.DataFrame(data)
@@ -120,10 +125,36 @@ def noJobsinLocation(browser, curr_jobpage):
     except:
         pass
 
+def findHiringTeam(browser):
+    try:
+        name_info = browser.find_element(By.CLASS_NAME,"hirer-card__container")
+        name_info = name_info.text.split('\n')
+        HR_name = name_info[0]
+        link_info = browser.find_element(By.XPATH,"//a[contains(@href,'https://www.linkedin.com/in')]")
+        try:
+            HR_link = link_info[0].get_attribute("href")
+        except:
+            HR_link = link_info.get_attribute("href")
+       
+    except:
+        # so the dataframe isnt messed up during cleaning
+
+        HR_name = 'none'
+        HR_link = 'none'
+        
+    finally:
+        return HR_name, HR_link
+        
+    
+    
+    
+
 def foundJobs(browser):
+    # found jobs at the location
     job_text = browser.find_elements(By.CLASS_NAME,"occludable-update")
     job_company, job_titles, job_locations, other_info = [], [], [], []
     unwanted_text = 'See more jobs with these suggestions:'
+    
     
     for i in range(len(job_text)):
         curr_job = job_text[i].text
@@ -137,7 +168,13 @@ def foundJobs(browser):
                 job_company.append(curr_job[1])
                 job_locations.append(curr_job[2].replace(', Israel', ' '))
                 other_info.append(', '.join(e for e in curr_job[3:]))
-    return job_company, job_titles, job_locations, other_info 
+   
+    # sometimes info about the hiring team is available
+    
+    HR_name, HR_link = findHiringTeam(browser)
+    
+        
+    return job_company, job_titles, job_locations, HR_name, HR_link, other_info 
  
 def jobFinder(browser,curr_jobpage):
     browser.get(curr_jobpage)
@@ -162,15 +199,20 @@ def jobFinder(browser,curr_jobpage):
         # enter location in search box
         searchLocation('israel')
         
+        
+        
         # a banner pops up if as a result of changing location there are no jobs 
         job_info = noJobsinLocation(browser, curr_jobpage)
         
+      
         # in the case that there are jobs at the location
-        job_company, job_titles, job_locations, other_info  = foundJobs(browser)
+        job_company, job_titles, job_locations,HR_name, HR_link, other_info  = foundJobs(browser)
+        
+        
                       
         # create DataFrame   
         job_link = [curr_jobpage] * len(other_info)
-        job_info = createDataFrame(job_company, job_titles, job_locations,job_link, other_info)
+        job_info = createDataFrame(job_company, job_titles, job_locations,job_link, HR_name, HR_link, other_info)
     return job_info
     
 def printProgressBar(index, total, label):
@@ -221,7 +263,7 @@ t = time.time()
 
 chrome_executable = Service(executable_path='chromedriver.exe', log_path='NUL')
 browser = webdriver.Chrome(service=chrome_executable)
-
+browser.maximize_window()
 login(browser)
 companies_jobpages = getCompaniesJobLink(browser)
 companies_df = concatDFs(browser,companies_jobpages)
@@ -232,7 +274,7 @@ companies_df_clean = cleanData(companies_df)
 companies_df_clean.to_excel("companies.xlsx")
 elapsed = time.time() - t
 sys.stdout.write('\r')
-
+print('Finished! Running time:', elapsed)
 """    
 if __name__ == "__main__":
     main()
