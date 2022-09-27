@@ -1,8 +1,8 @@
- LinkedinBot
+# LinkedinBot 🤖
 
 Job hunting is a full time job - so I built a bot to help me web scrape through LinkedIn (:
 
-used the Selenium library for webscraping.
+I used the Selenium library for webscraping.
 
 This bot scrolls through companies I follow on LinkedIn, filters jobs based on keywords and location, and exports all relevant job postings to a Dataframe. The dataframe includes information about the person posting the job, but I ommited this information for privacy reasons.
 
