@@ -15,6 +15,7 @@ import time
 import sys
 import pandas as pd
 import json
+from datetime import date
 
 
 
@@ -76,20 +77,27 @@ def noJobs(browser, curr_jobpage = '', jobstatus = 'global'):
             # only if there are no jobs in israel. 
             browser.get(curr_jobpage)
             
-        WebDriverWait(browser, 20).until(EC.visibility_of_element_located((By.XPATH,'//h1')))
-        job_company = browser.find_elements(By.XPATH,'//h1')
-        job_company = job_company[0].text
-        
-        # I filled the data so the cleanData function doesnt remove stuff
-        data = {'Company name': [job_company],
-                'Job Title': 'no jobs',
-                'Job Location': 'none',
-                'Job Link': 'none',
-                'HR Name': 'none',
-                'HR link': 'none',
-                'Other Info': 'none'}
-        job_info = pd.DataFrame(data)
-        return job_info
+        time.sleep(5)
+        try:
+            job_company = browser.find_elements(By.XPATH,'//h1')
+            job_company = job_company[0].text
+            
+            # I filled the data with "none" so the cleanData function doesnt remove stuff
+            data = {'Company name': [job_company],
+                    'Job Title': 'no jobs',
+                    'Job Location': 'none',
+                    'Job Link': 'none',
+                    'HR Name': 'none',
+                    'HR link': 'none',
+                    'Other Info': 'none'}
+            job_info = pd.DataFrame(data)
+        except:
+            # in case a page has been deleted 
+            nopage = browser.find_element(By.XPATH,"//*[text()='This LinkedIn Page isn’t available']").text
+            if len(nopage) > 0:
+                print('This page has been deleted! Please unfollow /ncurr_jobpage')
+                
+            return job_info
 
 
     
@@ -263,7 +271,7 @@ t = time.time()
 
 chrome_executable = Service(executable_path='chromedriver.exe', log_path='NUL')
 browser = webdriver.Chrome(service=chrome_executable)
-browser.maximize_window()
+# browser.maximize_window()
 login(browser)
 companies_jobpages = getCompaniesJobLink(browser)
 companies_df = concatDFs(browser,companies_jobpages)
@@ -271,7 +279,9 @@ companies_df_clean = cleanData(companies_df)
 
 
 # write to excel
-companies_df_clean.to_excel("companies.xlsx")
+today = date.today()
+xl_name = "companies {}.xlsx".format(today)
+companies_df_clean.to_excel(xl_name)
 elapsed = time.time() - t
 sys.stdout.write('\r')
 print('Finished! Running time:', elapsed)
