@@ -25,15 +25,17 @@ def login(browser):
         json_data = json.load(openfile)
         
     browser.get("https://www.linkedin.com")
-    time.sleep(3)
+    time.sleep(5)
     username_key = browser.find_element(By.ID,"session_key")
     username_key.send_keys(json_data['email'])
     password_key = browser.find_element(By.ID,"session_password")
     password_key.send_keys(json_data['password'])
-    login_button = browser.find_element(By.CLASS_NAME, "sign-in-form__submit-button")
-    # TODO: remove sleep
-    time.sleep(3)
+    login_button =WebDriverWait(browser, 10).until(
+        EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-id="sign-in-form__submit-btn"]')))
+
     login_button.click()
+
+
 
 def infiniteScroll(browser):
     # infinte scroll
@@ -61,6 +63,7 @@ def getCompaniesJobLink(browser):
     company_page = browser.find_elements(By.XPATH,"//a[contains(@href,'https://www.linkedin.com/company/')]")
     # create link for the job page for each company
     # TODO: company_page returns two times the same link. check if possible to remove one of them and then remove if statement
+    
     companies_jobpages = []
     prev_page = company_page[0].get_attribute("href") + 'jobs/'
     for x in range (1,len(company_page)):
@@ -116,15 +119,15 @@ def createDataFrame(job_company, job_titles, job_locations,job_link,HR_name, HR_
     return job_info
 
 def searchLocation(location):
-        time.sleep(5)   
+        time.sleep(10)   
         # job location - israel
+        WebDriverWait(browser, 20).until(EC.visibility_of_element_located( ( By.CLASS_NAME, 'jobs-search-box__text-input' )))
         search_bars = browser.find_elements(By.CLASS_NAME, 'jobs-search-box__text-input')
         search_location = search_bars[3]
         search_location.clear()
         search_location.send_keys(location)
         search_location.send_keys(Keys.RETURN)
         time.sleep(5)
-
 def noJobsinLocation(browser, curr_jobpage):
     try:
         browser.find_element(By.CLASS_NAME,"jobs-search-no-results-banner")
@@ -245,14 +248,14 @@ def concatDFs(browser,companies_jobpages):
 def cleanData(companies_df):
     # remove job titles with unwanted keywords
     with open('unwanted_jobs.json', 'r') as openfile:
-        unwanted_jobs_dict= json.load(openfile)
+        unwanted_jobs_dict = json.load(openfile)
     keywords = unwanted_jobs_dict['keywords']
     
     for i in range(0,len(keywords)):
         word = keywords[i]
         companies_df = companies_df[companies_df["Job Title"].str.contains(word) == False]
-
        
+    cities = unwanted_jobs_dict['cities']
     cities = unwanted_jobs_dict['cities']
     for i in range(0,len(cities)):
         city = cities[i]
